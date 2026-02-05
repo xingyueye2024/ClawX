@@ -26,15 +26,19 @@ export function Dashboard() {
   const { channels, fetchChannels } = useChannelsStore();
   const { skills, fetchSkills } = useSkillsStore();
   
-  // Fetch data on mount
-  useEffect(() => {
-    fetchChannels();
-    fetchSkills();
-  }, [fetchChannels, fetchSkills]);
+  const isGatewayRunning = gatewayStatus.state === 'running';
   
-  // Calculate statistics
-  const connectedChannels = channels.filter((c) => c.status === 'connected').length;
-  const enabledSkills = skills.filter((s) => s.enabled).length;
+  // Fetch data only when gateway is running
+  useEffect(() => {
+    if (isGatewayRunning) {
+      fetchChannels();
+      fetchSkills();
+    }
+  }, [fetchChannels, fetchSkills, isGatewayRunning]);
+  
+  // Calculate statistics safely
+  const connectedChannels = Array.isArray(channels) ? channels.filter((c) => c.status === 'connected').length : 0;
+  const enabledSkills = Array.isArray(skills) ? skills.filter((s) => s.enabled).length : 0;
   
   // Calculate uptime
   const uptime = gatewayStatus.connectedAt

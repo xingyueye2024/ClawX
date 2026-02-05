@@ -75,12 +75,19 @@ async function initialize(): Promise<void> {
   // Create system tray
   createTray(mainWindow);
 
-  // Override security headers for the OpenClaw Control UI webview
+  // Override security headers ONLY for the OpenClaw Gateway Control UI
   // The Control UI sets X-Frame-Options: DENY and CSP frame-ancestors 'none'
-  // which prevents embedding in an Electron webview
+  // which prevents embedding in an iframe. Only apply to gateway URLs.
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    const isGatewayUrl = details.url.includes('127.0.0.1:18789') || details.url.includes('localhost:18789');
+    
+    if (!isGatewayUrl) {
+      callback({ responseHeaders: details.responseHeaders });
+      return;
+    }
+    
     const headers = { ...details.responseHeaders };
-    // Remove X-Frame-Options to allow embedding in webview
+    // Remove X-Frame-Options to allow embedding in iframe
     delete headers['X-Frame-Options'];
     delete headers['x-frame-options'];
     // Remove restrictive CSP frame-ancestors
