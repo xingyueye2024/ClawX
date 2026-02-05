@@ -4,34 +4,16 @@
  * The Control UI handles all chat protocol details (sessions, streaming, etc.)
  * and is served by the Gateway at http://127.0.0.1:{port}/
  */
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { AlertCircle, RefreshCw, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useGatewayStore } from '@/stores/gateway';
-
-// Custom CSS to inject into the Control UI to match ClawX theme
-const CUSTOM_CSS = `
-  /* Hide the Control UI header/nav that we don't need */
-  .gateway-header, [data-testid="gateway-header"] {
-    display: none !important;
-  }
-  /* Remove top padding that the header would occupy */
-  body, #root {
-    background: transparent !important;
-  }
-  /* Ensure the chat area fills the frame */
-  .chat-container, [data-testid="chat-container"] {
-    height: 100vh !important;
-    max-height: 100vh !important;
-  }
-`;
 
 export function Chat() {
   const gatewayStatus = useGatewayStore((state) => state.status);
   const [controlUiUrl, setControlUiUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const webviewRef = useRef<HTMLWebViewElement>(null);
   
   const isGatewayRunning = gatewayStatus.state === 'running';
   
@@ -53,57 +35,43 @@ export function Chat() {
           setControlUiUrl(r.url);
         } else {
           setError(r.error || 'Failed to get Control UI URL');
+          setLoading(false);
         }
       })
       .catch((err: unknown) => {
         setError(String(err));
-      })
-      .finally(() => {
         setLoading(false);
       });
   }, [isGatewayRunning]);
-  
-  // Inject custom CSS when webview loads
-  const handleWebviewReady = useCallback(() => {
-    const webview = webviewRef.current as unknown as HTMLElement & {
-      addEventListener: (event: string, cb: (e: unknown) => void) => void;
-      insertCSS: (css: string) => Promise<string>;
-      reload: () => void;
-    };
-    if (!webview) return;
-    
-    webview.addEventListener('dom-ready', () => {
-      // Inject custom CSS to match ClawX theme
-      webview.insertCSS(CUSTOM_CSS).catch((err: unknown) => {
-        console.warn('Failed to inject CSS:', err);
-      });
-      setLoading(false);
-    });
-    
-    webview.addEventListener('did-fail-load', (event: unknown) => {
-      const e = event as { errorCode: number; errorDescription: string };
-      if (e.errorCode !== -3) { // -3 is ERR_ABORTED, ignore it
-        setError(`Failed to load: ${e.errorDescription}`);
-        setLoading(false);
-      }
-    });
+
+  // Handle iframe load events
+  const handleIframeLoad = useCallback(() => {
+    setLoading(false);
+    setError(null);
   }, []);
-  
-  // Set up webview event listeners
-  useEffect(() => {
-    if (controlUiUrl && webviewRef.current) {
-      handleWebviewReady();
-    }
-  }, [controlUiUrl, handleWebviewReady]);
+
+  const handleIframeError = useCallback(() => {
+    setError('Failed to load chat interface');
+    setLoading(false);
+  }, []);
   
   const handleReload = useCallback(() => {
-    const webview = webviewRef.current as unknown as HTMLElement & { reload: () => void };
-    if (webview) {
-      setLoading(true);
-      setError(null);
-      webview.reload();
-    }
-  }, []);
+    setLoading(true);
+    setError(null);
+    // Force re-mount the iframe by clearing and resetting URL
+    const url = controlUiUrl;
+    setControlUiUrl(null);
+    setTimeout(() => setControlUiUrl(url), 100);
+  }, [controlUiUrl]);
+
+  // Auto-hide loading after a timeout (fallback)
+  useEffect(() => {
+    if (!loading || !controlUiUrl) return;
+    const timer = setTimeout(() => {
+      setLoading(false);
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [loading, controlUiUrl]);
   
   // Gateway not running state
   if (!isGatewayRunning) {
@@ -132,7 +100,7 @@ export function Chat() {
       )}
       
       {/* Error state */}
-      {error && (
+      {error && !loading && (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-background p-8 text-center">
           <AlertCircle className="h-12 w-12 text-red-500 mb-4" />
           <h2 className="text-xl font-semibold mb-2">Connection Error</h2>
@@ -144,19 +112,19 @@ export function Chat() {
         </div>
       )}
       
-      {/* Embedded Control UI */}
+      {/* Embedded Control UI via iframe */}
       {controlUiUrl && (
-        <webview
-          ref={webviewRef as unknown as React.RefObject<HTMLElement>}
+        <iframe
           src={controlUiUrl}
-          className="flex-1 w-full h-full border-0"
-          // @ts-expect-error webview attributes not in React types
-          allowpopups="true"
+          onLoad={handleIframeLoad}
+          onError={handleIframeError}
+          className="flex-1 w-full border-0"
           style={{ 
-            display: error ? 'none' : 'flex',
-            flex: 1,
-            minHeight: 0,
+            display: error && !loading ? 'none' : 'block',
+            height: '100%',
           }}
+          title="ClawX Chat"
+          sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-modals"
         />
       )}
     </div>
